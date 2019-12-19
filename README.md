@@ -1,5 +1,13 @@
 # Neo4j Fabric Quickstart
 
+What's this all about?
+
+In Neo4j 4.0 Enterprise Edition, there's a 
+[major new feature called Fabric](https://neo4j.com/docs/operations-manual/4.0/fabric/) 
+that allows you to write queries that span more than one graph.
+
+This repo is intended as a quickstart guide to show how it works, with running examples.
+
 ## Setup
 
 ### Setup Network Aliases
@@ -19,9 +27,9 @@ us use docker network names as synonymous with localhost.
 
 This will create *3* containers:
 
-- *head* which will serve fabric queries out of a database called fabric
-- *fabric1* which will contain a database called city
-- *fabric2* which will contain a database called country
+- *head* which will serve fabric queries out of a database called fabric, and also contain a master "sharding" database called regions
+- *fabric1* which will contain a database called europe
+- *fabric2* which will contain a database called americas
 
 Note that this stack will run 3 copies of Neo4j on your local machine.  Head will operate
 on the usual ports.  Fabric1 and fabric2 (to deconflict them) will run on non-standard higher ports.
@@ -31,42 +39,56 @@ on the usual ports.  Fabric1 and fabric2 (to deconflict them) will run on non-st
 Run these two scripts:
 
 ```
-./load-cities.sh
-./load-countries.sh
+./load-regions.sh
+./load-europe.sh
+./load-americas.sh
 ```
 
-These scripts load the same simple CSV file, putting the cities in 1 database, the countries in
-another, to simulate our sharding setup.
+These scripts load simple CSV file, putting cities into 2 sharded databases, one for
+Europe, and one for the Americas.
 
 ### Connect to the Head Fabric Node, and Start Querying!
 
-*How many nodes does each database have?*
+*How many cities does each shard have?*
+
+```
+UNWIND [
+    { id: 1, region: "Europe" },
+    { id: 2, region: "Americas" }
+] as shard
+CALL {
+  USE fabric.graph(shard.id)
+  MATCH (c:City) return count(n) as citiesHere
+}
+RETURN shard.region, citiesHere;
+```
+
+*Show all cities across all regions with more than 5,000,000 population*
+
+```
+  USE fabric.europe
+  MATCH (c:City) 
+  WHERE c.population > 5000000
+  RETURN 'Europe' as region, c.name as name, c.population as population
+
+UNION
+
+  USE fabric.americas
+  MATCH (c:City)
+  WHERE c.population > 5000000
+  RETURN 'Americas' as region, c.name as name, c.population as population
+```
+
+*Aggregation: Show Total Regional Population, Twice Aggregated*
 
 ```
 UNWIND fabric.graphIds() AS graphId
 CALL {
   USE fabric.graph(graphId)
-  MATCH (n) return count(n) as nodesHere
-}
-RETURN graphId, nodesHere;
-```
-
-*Most populous cities*
-
-Note that this is done from the fabric database, not from cities, and shows how to use
-cities in fabric.
-
-```
-CALL {
-  USE fabric.city
   MATCH (c:City)
-  WHERE c.population is not null and
-  c.population <> ""
-  RETURN c 
+  RETURN sum(c.population) as regionPopulation
 }
-return c.name, c.population
-ORDER BY toInteger(c.population) DESC
-LIMIT 10;
+RETURN sum(regionPopulation) as totalTrackedPopulation;
 ```
 
 
